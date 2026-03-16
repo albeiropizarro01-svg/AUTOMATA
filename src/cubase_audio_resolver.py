@@ -1,63 +1,67 @@
-from lxml import etree
-
-
 class CubaseAudioResolver:
 
     def __init__(self, root):
-
         self.root = root
 
-    # ---------------------------------------
-    # encontrar todas las referencias a audio
-    # ---------------------------------------
+    def _normalize_filename(self, filename):
+        if filename.lower().endswith('.wav'):
+            return filename
+        return f"{filename}.wav"
 
-    def find_audio_nodes(self):
+    def _set_fnpath(self, fnpath_node, filename):
+        name_node = fnpath_node.find("./string[@name='Name']")
+        if name_node is not None:
+            name_node.set("value", filename)
 
-        nodes = []
+        path_node = fnpath_node.find("./string[@name='Path']")
+        if path_node is not None:
+            path_node.set("value", "Media")
 
-        for node in self.root.xpath(".//string"):
+    def _update_description_and_clip_name(self, event, filename):
+        base = filename.rsplit(".", 1)[0]
 
-            value = node.get("value")
+        desc = event.find("./string[@name='Description']")
+        if desc is not None:
+            desc.set("value", base)
 
-            if value is None:
-                continue
+        clip_name = event.find(".//obj[@class='PAudioClip']/string[@name='Name']")
+        if clip_name is not None:
+            clip_name.set("value", base)
 
-            if value.lower().endswith(".wav"):
-                nodes.append(node)
+    def _event_audio_path_ids(self, event):
+        ids = set()
+        for node in event.xpath(".//obj[@class='AudioFile']/obj[@name='FPath'][@ID]"):
+            ids.add(node.get("ID"))
 
-        return nodes
+        # fallback defensivo si un template usa FNPath local sin AudioFile/FPath explícito
+        for node in event.xpath(".//obj[@class='FNPath'][@ID]"):
+            ids.add(node.get("ID"))
 
-    # ---------------------------------------
-    # actualizar nombres de archivo
-    # ---------------------------------------
+        for node in event.xpath(".//obj[@name='FPath'][@ID]"):
+            ids.add(node.get("ID"))
 
-    def replace_audio_filename(self, old_name, new_name):
+        return {node_id for node_id in ids if node_id}
 
-        for node in self.find_audio_nodes():
+    def update_event_audio_references(self, event, filename):
+        """
+        Actualiza todas las referencias de audio de un MAudioEvent:
+        - PAudioClip/FNPath
+        - AudioCluster/Substreams/AudioFile/FPath (por ID compartido)
+        """
+        normalized_filename = self._normalize_filename(filename)
 
-            value = node.get("value")
+        self._update_description_and_clip_name(event, normalized_filename)
 
-            if value.lower() == old_name.lower():
-                node.set("value", new_name)
+        # Nodo real del clip: MAudioEvent -> PAudioClip -> FNPath -> string[@name='Name']
+        for fnpath in event.xpath("./obj[@class='PAudioClip']/obj[@class='FNPath']"):
+            self._set_fnpath(fnpath, normalized_filename)
 
-    # ---------------------------------------
-    # actualizar rutas
-    # ---------------------------------------
+        for path_id in self._event_audio_path_ids(event):
+            for fnpath in self.root.xpath(f".//obj[@class='FNPath'][@ID='{path_id}']"):
+                self._set_fnpath(fnpath, normalized_filename)
 
-    def force_media_folder(self):
-
-        for node in self.root.xpath(".//string[@name='Path']"):
-
-            node.set("value", "Media")
-
-    # ---------------------------------------
-    # debug para ver qué está usando Cubase
-    # ---------------------------------------
-
-    def print_audio_references(self):
-
-        print("\nREFERENCIAS DE AUDIO DETECTADAS:\n")
-
-        for node in self.find_audio_nodes():
-
-            print(node.get("value"))
+    def find_wav_references(self):
+        return self.root.xpath(
+            ".//obj[@class='FNPath']/string[@name='Name' and "
+            "contains(translate(@value,'WAV','wav'),'.wav')]"
+        )
