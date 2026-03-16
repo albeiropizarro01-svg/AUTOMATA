@@ -186,7 +186,7 @@ class SessionBuilder:
     # ---------------------------------------
 
     def insert_event(self, track_node, event):
-        # track_node must be obj[@class='MListNode']
+
         events_list = track_node.find("./list[@name='Events']")
 
         if events_list is None:
