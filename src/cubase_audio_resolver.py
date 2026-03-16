@@ -3,6 +3,11 @@ class CubaseAudioResolver:
     def __init__(self, root):
         self.root = root
 
+    def _normalize_filename(self, filename):
+        if filename.lower().endswith('.wav'):
+            return filename
+        return f"{filename}.wav"
+
     def _set_fnpath(self, fnpath_node, filename):
         name_node = fnpath_node.find("./string[@name='Name']")
         if name_node is not None:
@@ -25,7 +30,10 @@ class CubaseAudioResolver:
 
     def _event_audio_path_ids(self, event):
         ids = set()
+        for node in event.xpath(".//obj[@class='AudioFile']/obj[@name='FPath'][@ID]"):
+            ids.add(node.get("ID"))
 
+        # fallback defensivo si un template usa FNPath local sin AudioFile/FPath explícito
         for node in event.xpath(".//obj[@class='FNPath'][@ID]"):
             ids.add(node.get("ID"))
 
@@ -40,14 +48,17 @@ class CubaseAudioResolver:
         - PAudioClip/FNPath
         - AudioCluster/Substreams/AudioFile/FPath (por ID compartido)
         """
-        self._update_description_and_clip_name(event, filename)
+        normalized_filename = self._normalize_filename(filename)
 
-        for fnpath in event.xpath(".//obj[@class='FNPath']"):
-            self._set_fnpath(fnpath, filename)
+        self._update_description_and_clip_name(event, normalized_filename)
+
+        # Nodo real del clip: MAudioEvent -> PAudioClip -> FNPath -> string[@name='Name']
+        for fnpath in event.xpath("./obj[@class='PAudioClip']/obj[@class='FNPath']"):
+            self._set_fnpath(fnpath, normalized_filename)
 
         for path_id in self._event_audio_path_ids(event):
             for fnpath in self.root.xpath(f".//obj[@class='FNPath'][@ID='{path_id}']"):
-                self._set_fnpath(fnpath, filename)
+                self._set_fnpath(fnpath, normalized_filename)
 
     def find_wav_references(self):
         return self.root.xpath(

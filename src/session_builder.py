@@ -166,12 +166,27 @@ class SessionBuilder:
 
         return None
 
+    def update_track_name(self, track_node, track_type):
+
+        # track_node es obj[@class='MListNode'] dentro de MAudioTrackEvent
+        track_event = track_node.getparent()
+
+        if track_event is None:
+            return
+
+        track_name_node = track_event.find("./obj[@class='MAudioTrack']/string[@name='Name']")
+
+        if track_name_node is None:
+            return
+
+        track_name_node.set("value", track_type.upper())
+
     # ---------------------------------------
     # INSERTAR EVENTO
     # ---------------------------------------
 
     def insert_event(self, track_node, event):
-        # track_node must be obj[@class='MListNode']
+
         events_list = track_node.find("./list[@name='Events']")
 
         if events_list is None:
@@ -221,6 +236,9 @@ class SessionBuilder:
             global_fnpath = available_fnpaths[next_fnpath_idx]
             next_fnpath_idx += 1
             path_id = global_fnpath.get("ID")
+
+            # Renombrar pista visible en Cubase (MAudioTrack/Name)
+            self.update_track_name(track, track_type)
 
             event = self.clone_event(path_id)
 
