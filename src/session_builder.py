@@ -3,6 +3,8 @@ from pathlib import Path
 import uuid
 import copy
 
+from src.cubase_audio_resolver import CubaseAudioResolver
+
 
 class SessionBuilder:
 
@@ -14,8 +16,10 @@ class SessionBuilder:
 
         self.tree = etree.parse(str(self.template_path))
         self.root = self.tree.getroot()
+        self.audio_resolver = CubaseAudioResolver(self.root)
 
         self.tracks = self.extract_tracks()
+        self.template_event_source = self.get_template_event()
 
     def generate_id(self):
         return str(uuid.uuid4().int >> 64)
@@ -74,17 +78,51 @@ class SessionBuilder:
 
         return event
 
+    def _get_global_fnpaths(self):
+
+        # Solo FNPath globales en primer nivel: /tracklist2/obj[@class='FNPath']
+        return self.root.xpath("./obj[@class='FNPath']")
+
+    def _assign_event_path_id(self, event, path_id):
+
+        for node in event.xpath(".//obj[@class='FNPath'][@ID]"):
+            node.set("ID", path_id)
+
+        for node in event.xpath(".//obj[@name='FPath'][@ID]"):
+            node.set("ID", path_id)
+
+    def _clear_all_template_audio_events(self):
+
+        for events_list in self.root.xpath(".//list[@name='Events']"):
+            for event in list(events_list):
+                if event.tag == "obj" and event.get("class") == "MAudioEvent":
+                    events_list.remove(event)
+
     # ---------------------------------------
     # CLONAR EVENTO
     # ---------------------------------------
 
-    def clone_event(self):
+    def clone_event(self, path_id):
 
-        template_event = self.get_template_event()
+        new_event = copy.deepcopy(self.template_event_source)
 
-        new_event = copy.deepcopy(template_event)
-
+        # MAudioEvent siempre debe ser único
         new_event.set("ID", str(self.generate_id()))
+
+        # Regenerar IDs internos de contenedores/eventos,
+        # preservando nodos de path enlazados por ID.
+        for obj in new_event.xpath(".//obj[@ID]"):
+
+            if obj.get("class") == "FNPath":
+                continue
+
+            if obj.get("name") == "FPath":
+                continue
+
+            obj.set("ID", str(self.generate_id()))
+
+        # Reusar ID de FNPath global existente del template.
+        self._assign_event_path_id(new_event, path_id)
 
         return new_event
 
@@ -93,36 +131,7 @@ class SessionBuilder:
     # ---------------------------------------
 
     def update_audio_paths(self, event, filename):
-
-        base = filename.replace(".wav", "")
-
-        # actualizar descripción
-        desc = event.find(".//string[@name='Description']")
-        if desc is not None:
-            desc.set("value", base)
-
-        # actualizar nombre del clip
-        clip_name = event.find(".//obj[@class='PAudioClip']/string[@name='Name']")
-        if clip_name is not None:
-            clip_name.set("value", base)
-
-        # FNPath
-        fn_name = event.find(".//obj[@class='FNPath']/string[@name='Name']")
-        if fn_name is not None:
-            fn_name.set("value", filename)
-
-        fn_path = event.find(".//obj[@class='FNPath']/string[@name='Path']")
-        if fn_path is not None:
-            fn_path.set("value", "Media")
-
-        # FPath dentro del AudioCluster
-        fpath_name = event.find(".//obj[@name='FPath']/string[@name='Name']")
-        if fpath_name is not None:
-            fpath_name.set("value", filename)
-
-        fpath_path = event.find(".//obj[@name='FPath']/string[@name='Path']")
-        if fpath_path is not None:
-            fpath_path.set("value", "Media")
+        self.audio_resolver.update_event_audio_references(event, filename)
 
     # ---------------------------------------
     # BUSCAR PISTA
@@ -178,6 +187,14 @@ class SessionBuilder:
 
         print("")
 
+        # Limpiar eventos de audio originales del template para evitar referencias heredadas.
+        self._clear_all_template_audio_events()
+
+        available_fnpaths = self._get_global_fnpaths()
+
+        used_fnpaths = []
+        next_fnpath_idx = 0
+
         for stem, track_type in self.matches:
 
             track = self.find_best_track(track_type)
@@ -187,13 +204,28 @@ class SessionBuilder:
                 print("No se encontró pista para:", track_type)
                 continue
 
-            event = self.clone_event()
+            if next_fnpath_idx >= len(available_fnpaths):
+                raise Exception(
+                    f"Template tiene {len(available_fnpaths)} FNPath globales y no alcanza para los stems insertados."
+                )
+
+            global_fnpath = available_fnpaths[next_fnpath_idx]
+            next_fnpath_idx += 1
+            path_id = global_fnpath.get("ID")
+
+            event = self.clone_event(path_id)
 
             self.update_audio_paths(event, stem)
 
             self.insert_event(track, event)
+            used_fnpaths.append(global_fnpath)
 
             print("Evento creado:", stem)
+
+        # Mantener sólo los FNPath globales usados por los stems insertados.
+        for fnpath in available_fnpaths:
+            if fnpath not in used_fnpaths:
+                self.root.remove(fnpath)
 
         self.output_path.parent.mkdir(exist_ok=True)
 
