@@ -32,9 +32,14 @@ class SessionBuilder:
 
         tracks = {}
 
-        for node in self.root.xpath('//string[@name="Name"]'):
+        for node in self.root.xpath(".//obj[@class='MListNode']"):
 
-            name = node.get("value")
+            name_node = node.find("./string[@name='Name']")
+
+            if name_node is None:
+                continue
+
+            name = name_node.get("value")
 
             if not name:
                 continue
@@ -166,11 +171,15 @@ class SessionBuilder:
     # ---------------------------------------
 
     def insert_event(self, track_node, event):
+        # track_node must be obj[@class='MListNode']
+        events_list = track_node.find("./list[@name='Events']")
 
-        parent = track_node.getparent()
+        if events_list is None:
+            track_name = track_node.find("./string[@name='Name']")
+            label = track_name.get("value") if track_name is not None else "unknown"
+            raise Exception(f"No existe list[@name='Events'] en la pista: {label}")
 
-        if parent is not None:
-            parent.append(event)
+        events_list.append(event)
 
     # ---------------------------------------
     # BUILD
