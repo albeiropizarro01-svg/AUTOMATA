@@ -223,6 +223,7 @@ class SessionBuilder:
 
         self.clear_template_events()
         self.clear_fnpaths()
+        abs_media_path = str(self.media_folder.resolve())
 
         for stem, track_type in self.matches:
 
@@ -249,6 +250,18 @@ class SessionBuilder:
             fpath = audio_file.find("./obj[@name='FPath']")
             if fpath is not None:
                 fpath.set("ID", path_id)
+
+            self.pool_builder.add_audio_file(
+                filename=stem,
+                audio_id=audio_id,
+                path_id=path_id
+            )
+
+            self.audio_resolver.update_event_audio_references(
+                event,
+                stem,
+                abs_media_path
+            )
 
             self.audio_resolver.update_event_audio_references(event, stem)
 
