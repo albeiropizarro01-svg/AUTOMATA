@@ -251,6 +251,18 @@ class SessionBuilder:
             if fpath is not None:
                 fpath.set("ID", path_id)
 
+            self.pool_builder.add_audio_file(
+                filename=stem,
+                audio_id=audio_id,
+                path_id=path_id
+            )
+
+            self.audio_resolver.update_event_audio_references(
+                event,
+                stem,
+                abs_media_path
+            )
+
             self.audio_resolver.update_event_audio_references(event, stem)
 
             audio_path = self.media_folder / stem
@@ -280,5 +292,3 @@ class SessionBuilder:
 
         print("\nSesión generada en:")
         print(self.output_path)
-        
-       
