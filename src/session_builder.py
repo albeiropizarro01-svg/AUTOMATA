@@ -183,6 +183,10 @@ class SessionBuilder:
             if obj.get("name") == "FPath":
                 continue
 
+            if obj.get("name") == "Stream":
+                obj.attrib.pop("ID", None)
+                continue
+
             obj.set("ID", self.generate_id())
 
         self.assign_event_path_id(new_event, path_id)
@@ -255,6 +259,10 @@ class SessionBuilder:
 
             audio_id = self.generate_id()
             audio_file.set("ID", audio_id)
+
+            stream = audio_file.find("./obj[@name='Stream']")
+            if stream is not None:
+                stream.set("ID", audio_id)
 
             fpath = audio_file.find("./obj[@name='FPath']")
             if fpath is not None:
