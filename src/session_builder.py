@@ -237,6 +237,7 @@ class SessionBuilder:
         self.clear_template_events()
         self.clear_pool()
         self.clear_fnpaths()
+        abs_media_path = str(self.media_folder.resolve())
 
         for stem, track_type in self.matches:
 
@@ -266,7 +267,11 @@ class SessionBuilder:
                 path_id=path_id
             )
 
-            self.audio_resolver.update_event_audio_references(event, stem)
+            self.audio_resolver.update_event_audio_references(
+                event,
+                stem,
+                abs_media_path
+            )
 
             audio_path = self.media_folder / stem
             frames, rate, channels, sampwidth = get_wav_info(audio_path)

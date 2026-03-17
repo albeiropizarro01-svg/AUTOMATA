@@ -22,7 +22,7 @@ class CubaseAudioResolver:
     # FNPath
     # ---------------------------------------
 
-    def _set_fnpath(self, fnpath_node, filename):
+    def _set_fnpath(self, fnpath_node, filename, abs_media_path):
 
         name_node = fnpath_node.find("./string[@name='Name']")
         if name_node is not None:
@@ -30,7 +30,14 @@ class CubaseAudioResolver:
 
         path_node = fnpath_node.find("./string[@name='Path']")
         if path_node is not None:
-            path_node.set("value", "Media")
+            path_node.set("value", abs_media_path)
+
+        path_type_node = fnpath_node.find("./int[@name='PathType']")
+        if path_type_node is None:
+            path_type_node = fnpath_node.makeelement("int")
+            path_type_node.set("name", "PathType")
+            fnpath_node.append(path_type_node)
+        path_type_node.set("value", "2")
 
     # ---------------------------------------
     # EVENTO
@@ -68,7 +75,7 @@ class CubaseAudioResolver:
     # ACTUALIZACIÓN PRINCIPAL
     # ---------------------------------------
 
-    def update_event_audio_references(self, event, filename):
+    def update_event_audio_references(self, event, filename, abs_media_path):
         """
         Actualiza TODAS las referencias de audio:
         - nombres visibles
@@ -83,7 +90,7 @@ class CubaseAudioResolver:
 
         # actualizar FNPath del clip
         for fnpath in event.xpath(".//obj[@class='PAudioClip']/obj[@class='FNPath']"):
-            self._set_fnpath(fnpath, filename)
+            self._set_fnpath(fnpath, filename, abs_media_path)
 
         # actualizar todos los FNPath relacionados por ID
         path_ids = self._collect_path_ids(event)
@@ -91,7 +98,7 @@ class CubaseAudioResolver:
         for path_id in path_ids:
 
             for fnpath in self.root.xpath(f".//obj[@class='FNPath'][@ID='{path_id}']"):
-                self._set_fnpath(fnpath, filename)
+                self._set_fnpath(fnpath, filename, abs_media_path)
 
     # ---------------------------------------
     # DEBUG
