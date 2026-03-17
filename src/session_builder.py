@@ -4,8 +4,6 @@ import uuid
 import copy
 import wave
 
-from src.cubase_audio_resolver import CubaseAudioResolver
-
 
 def generate_hex_uuid():
     return uuid.uuid4().hex.upper()
@@ -35,17 +33,15 @@ class SessionBuilder:
 
         self.media_folder = self.output_path.parent / "Media"
 
-        self.audio_resolver = CubaseAudioResolver(self.root)
-
         self.tracks = self.extract_tracks()
         self.template_event_source = self.get_template_event()
 
     def generate_id(self):
         return str(uuid.uuid4().int >> 64)
 
-    # ---------------------------------------
+    # ----------------------------------------
     # TRACKS
-    # ---------------------------------------
+    # ----------------------------------------
 
     def extract_tracks(self):
 
@@ -66,13 +62,7 @@ class SessionBuilder:
             name_lower = name.lower()
 
             ignore = [
-                "standard panner",
-                "archivo wave",
-                "automation",
-                "quick controls",
-                "vst multitrack",
-                "input filter",
-                "eq",
+                "stereo out",
                 "stereo in"
             ]
 
@@ -98,52 +88,44 @@ class SessionBuilder:
 
         return event
 
-    # ---------------------------------------
-    # FNPath
-    # ---------------------------------------
+    # ----------------------------------------
+    # FNPath helpers
+    # ----------------------------------------
 
-    def create_fnpath(self, filename):
+    def _set_or_create_scalar(self, parent, tag, name, value):
+        node = parent.find(f"./{tag}[@name='{name}']")
+        if node is None:
+            node = etree.SubElement(parent, tag)
+            node.set("name", name)
+        node.set("value", value)
+        return node
 
+    def _set_fnpath_values(self, fnpath_node, filename, abs_media_path):
+        self._set_or_create_scalar(fnpath_node, "string", "Name", filename)
+        self._set_or_create_scalar(fnpath_node, "string", "Path", abs_media_path)
+        self._set_or_create_scalar(fnpath_node, "int", "PathType", "2")
+
+    def _create_global_fnpath(self, filename, abs_media_path, forced_id):
         fnpath = etree.SubElement(self.root, "obj")
         fnpath.set("class", "FNPath")
-        fnpath.set("ID", self.generate_id())
+        fnpath.set("ID", forced_id)
 
-        # nombre del archivo
-        name = etree.SubElement(fnpath, "string")
-        name.set("name", "Name")
-        name.set("value", filename)
-
-        # ruta absoluta REAL
-        abs_path = str(self.media_folder.resolve())
-
-        path = etree.SubElement(fnpath, "string")
-        path.set("name", "Path")
-        path.set("value", abs_path)
-
-        # tipo de ruta (2 = absoluta)
-        path_type = etree.SubElement(fnpath, "int")
-        path_type.set("name", "PathType")
-        path_type.set("value", "2")
-
+        self._set_fnpath_values(fnpath, filename, abs_media_path)
         return fnpath
 
-    def clear_fnpaths(self):
+    def clear_global_fnpaths(self):
         for fn in self.root.xpath(".//obj[@class='FNPath']"):
-            parent = fn.getparent()
+            self.root.remove(fn)
+
+    def clear_pool(self):
+        for pool in self.root.xpath(".//obj[@class='Pool']"):
+            parent = pool.getparent()
             if parent is not None:
-                parent.remove(fn)
+                parent.remove(pool)
 
-    def assign_event_path_id(self, event, path_id):
-
-        for node in event.xpath(".//obj[@class='FNPath'][@ID]"):
-            node.set("ID", path_id)
-
-        for node in event.xpath(".//obj[@name='FPath'][@ID]"):
-            node.set("ID", path_id)
-
-    # ---------------------------------------
+    # ----------------------------------------
     # EVENTOS
-    # ---------------------------------------
+    # ----------------------------------------
 
     def clear_template_events(self):
 
@@ -152,7 +134,7 @@ class SessionBuilder:
                 if event.tag == "obj" and event.get("class") == "MAudioEvent":
                     events_list.remove(event)
 
-    def clone_event(self, path_id):
+    def clone_event(self):
 
         new_event = copy.deepcopy(self.template_event_source)
 
@@ -172,13 +154,75 @@ class SessionBuilder:
 
             obj.set("ID", self.generate_id())
 
-        self.assign_event_path_id(new_event, path_id)
-
         return new_event
 
-    # ---------------------------------------
+    def rebuild_event_media_graph(self, event, filename, abs_media_path):
+
+        base = Path(filename).stem
+
+        desc = event.find("./string[@name='Description']")
+        if desc is not None:
+            desc.set("value", base)
+
+        clip_name = event.find(".//obj[@class='PAudioClip']/string[@name='Name']")
+        if clip_name is not None:
+            clip_name.set("value", base)
+
+        clip_fnpath = event.find(".//obj[@class='PAudioClip']/obj[@class='FNPath']")
+        if clip_fnpath is None:
+            raise Exception("Evento inválido: falta PAudioClip/FNPath")
+
+        audio_file = event.find(".//obj[@class='PAudioClip']//obj[@class='AudioFile']")
+        if audio_file is None:
+            raise Exception("Evento inválido: falta AudioFile")
+
+        for stale in event.xpath(".//obj[@class='FNPath']"):
+            if stale is clip_fnpath:
+                continue
+            parent = stale.getparent()
+            if parent is not None:
+                parent.remove(stale)
+
+        audio_id = self.generate_id()
+        clip_path_id = self.generate_id()
+        archive_path_id = self.generate_id()
+        orig_path_id = self.generate_id()
+
+        clip_fnpath.set("ID", clip_path_id)
+        self._set_fnpath_values(clip_fnpath, filename, abs_media_path)
+
+        orig_ref = clip_fnpath.find("./obj[@name='OrigPath']")
+        if orig_ref is None:
+            orig_ref = etree.SubElement(clip_fnpath, "obj")
+            orig_ref.set("name", "OrigPath")
+        orig_ref.set("ID", orig_path_id)
+
+        audio_file.set("ID", audio_id)
+
+        stream = audio_file.find("./obj[@name='Stream']")
+        if stream is None:
+            stream = etree.SubElement(audio_file, "obj")
+            stream.set("name", "Stream")
+        stream.set("ID", audio_id)
+
+        fpath = audio_file.find("./obj[@name='FPath']")
+        if fpath is None:
+            fpath = etree.SubElement(audio_file, "obj")
+            fpath.set("name", "FPath")
+        fpath.set("ID", clip_path_id)
+
+        archive_path = audio_file.find("./obj[@name='archivePath']")
+        if archive_path is None:
+            archive_path = etree.SubElement(audio_file, "obj")
+            archive_path.set("name", "archivePath")
+        archive_path.set("ID", archive_path_id)
+
+        self._create_global_fnpath(filename, abs_media_path, archive_path_id)
+        self._create_global_fnpath(filename, abs_media_path, orig_path_id)
+
+    # ----------------------------------------
     # TRACK MATCH
-    # ---------------------------------------
+    # ----------------------------------------
 
     def find_best_track(self, track_type):
 
@@ -198,7 +242,6 @@ class SessionBuilder:
         for track in self.tracks:
 
             for w in words:
-
                 if w in track:
                     return self.tracks[track]
 
@@ -206,23 +249,25 @@ class SessionBuilder:
 
     def insert_event(self, track_node, event):
 
-        events_list = track_node.find("./list[@name='Events']")
+        events_list = track_node.find(".//list[@name='Events']")
 
         if events_list is None:
             raise Exception("Track sin lista de eventos")
 
         events_list.append(event)
 
-    # ---------------------------------------
+    # ----------------------------------------
     # BUILD
-    # ---------------------------------------
+    # ----------------------------------------
 
     def build(self):
 
         print("\nCREANDO EVENTOS DE AUDIO:\n")
 
         self.clear_template_events()
-        self.clear_fnpaths()
+        self.clear_global_fnpaths()
+        self.clear_pool()
+
         abs_media_path = str(self.media_folder.resolve())
 
         for stem, track_type in self.matches:
@@ -233,37 +278,10 @@ class SessionBuilder:
                 print("No se encontró pista para:", track_type)
                 continue
 
-            fnpath = self.create_fnpath(stem)
-            path_id = fnpath.get("ID")
-
-            event = self.clone_event(path_id)
+            event = self.clone_event()
+            self.rebuild_event_media_graph(event, stem, abs_media_path)
 
             audio_file = event.find(".//obj[@class='AudioFile']")
-
-            audio_id = self.generate_id()
-            audio_file.set("ID", audio_id)
-
-            stream = audio_file.find("./obj[@name='Stream']")
-            if stream is not None:
-                stream.set("ID", audio_id)
-
-            fpath = audio_file.find("./obj[@name='FPath']")
-            if fpath is not None:
-                fpath.set("ID", path_id)
-
-            self.pool_builder.add_audio_file(
-                filename=stem,
-                audio_id=audio_id,
-                path_id=path_id
-            )
-
-            self.audio_resolver.update_event_audio_references(
-                event,
-                stem,
-                abs_media_path
-            )
-
-            self.audio_resolver.update_event_audio_references(event, stem)
 
             audio_path = self.media_folder / stem
             frames, rate, channels, sampwidth = get_wav_info(audio_path)
@@ -289,6 +307,3 @@ class SessionBuilder:
             xml_declaration=True,
             encoding="UTF-8"
         )
-
-        print("\nSesión generada en:")
-        print(self.output_path)
