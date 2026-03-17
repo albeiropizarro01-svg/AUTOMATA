@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+
+# Audio files
+*.wav
+*.aif
+*.aiff
+
+# Generated output
+output/
+Media/
+
+# MacOS
+.DS_Store
