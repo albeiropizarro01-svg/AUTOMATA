@@ -5,7 +5,6 @@ import copy
 import wave
 
 from src.cubase_audio_resolver import CubaseAudioResolver
-from src.pool_builder import PoolBuilder
 
 
 def generate_hex_uuid():
@@ -37,7 +36,6 @@ class SessionBuilder:
         self.media_folder = self.output_path.parent / "Media"
 
         self.audio_resolver = CubaseAudioResolver(self.root)
-        self.pool_builder = PoolBuilder(self.root, self.media_folder)
 
         self.tracks = self.extract_tracks()
         self.template_event_source = self.get_template_event()
@@ -154,21 +152,6 @@ class SessionBuilder:
                 if event.tag == "obj" and event.get("class") == "MAudioEvent":
                     events_list.remove(event)
 
-    def clear_pool(self):
-
-        pool = self.root.find(".//obj[@class='Pool']")
-
-        if pool is None:
-            return
-
-        audio_list = pool.find("./list[@name='AudioFiles']")
-
-        if audio_list is None:
-            return
-
-        for audio in list(audio_list):
-            audio_list.remove(audio)
-
     def clone_event(self, path_id):
 
         new_event = copy.deepcopy(self.template_event_source)
@@ -235,7 +218,6 @@ class SessionBuilder:
         print("\nCREANDO EVENTOS DE AUDIO:\n")
 
         self.clear_template_events()
-        self.clear_pool()
         self.clear_fnpaths()
 
         for stem, track_type in self.matches:
@@ -259,12 +241,6 @@ class SessionBuilder:
             fpath = audio_file.find("./obj[@name='FPath']")
             if fpath is not None:
                 fpath.set("ID", path_id)
-
-            self.pool_builder.add_audio_file(
-                filename=stem,
-                audio_id=audio_id,
-                path_id=path_id
-            )
 
             self.audio_resolver.update_event_audio_references(event, stem)
 
