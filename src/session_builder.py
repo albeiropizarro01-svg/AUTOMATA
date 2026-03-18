@@ -156,9 +156,9 @@ class SessionBuilder:
 
         return new_event
 
-    def rebuild_event_media_graph(self, event, filename, abs_media_path):
+    def rebuild_event_media_graph(self, event, original_filename, abs_media_path):
 
-        base = Path(filename).stem
+        base = Path(original_filename).stem
 
         desc = event.find("./string[@name='Description']")
         if desc is not None:
@@ -189,7 +189,7 @@ class SessionBuilder:
         orig_path_id = self.generate_id()
 
         clip_fnpath.set("ID", clip_path_id)
-        self._set_fnpath_values(clip_fnpath, filename, abs_media_path)
+        self._set_fnpath_values(clip_fnpath, original_filename, abs_media_path)
 
         orig_ref = clip_fnpath.find("./obj[@name='OrigPath']")
         if orig_ref is None:
@@ -217,8 +217,8 @@ class SessionBuilder:
             archive_path.set("name", "archivePath")
         archive_path.set("ID", archive_path_id)
 
-        self._create_global_fnpath(filename, abs_media_path, archive_path_id)
-        self._create_global_fnpath(filename, abs_media_path, orig_path_id)
+        self._create_global_fnpath(original_filename, abs_media_path, archive_path_id)
+        self._create_global_fnpath(original_filename, abs_media_path, orig_path_id)
 
     # ----------------------------------------
     # TRACK MATCH
@@ -270,7 +270,7 @@ class SessionBuilder:
 
         abs_media_path = str(self.media_folder.resolve())
 
-        for stem, track_type in self.matches:
+        for original_filename, track_type in self.matches:
 
             track = self.find_best_track(track_type)
 
@@ -279,11 +279,11 @@ class SessionBuilder:
                 continue
 
             event = self.clone_event()
-            self.rebuild_event_media_graph(event, stem, abs_media_path)
+            self.rebuild_event_media_graph(event, original_filename, abs_media_path)
 
             audio_file = event.find(".//obj[@class='AudioFile']")
 
-            audio_path = self.media_folder / stem
+            audio_path = self.media_folder / original_filename
             frames, rate, channels, sampwidth = get_wav_info(audio_path)
 
             frame_node = audio_file.find("./int[@name='FrameCount']")
@@ -297,7 +297,7 @@ class SessionBuilder:
 
             self.insert_event(track, event)
 
-            print("Evento creado:", stem)
+            print("Evento creado:", original_filename)
 
         self.output_path.parent.mkdir(exist_ok=True)
 
